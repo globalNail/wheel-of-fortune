@@ -6,7 +6,7 @@ interface EventFeedProps {
 
 export function EventFeed({ events }: EventFeedProps) {
   const eventLabelMap: Record<string, string> = {
-    SESSION_CREATED: "Tạo phiên",
+    SESSION_CREATED: "Tạo phòng",
     TEAM_JOINED: "Đội tham gia",
     GAME_STARTED: "Bắt đầu",
     TURN_CHANGED: "Đổi lượt",

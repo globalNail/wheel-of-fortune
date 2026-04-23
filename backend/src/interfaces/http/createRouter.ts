@@ -57,6 +57,14 @@ const resetSchema = z.object({
   numberOfTeams: z.number().int().min(2).max(8).optional(),
 });
 
+function extractIp(req: Request): string {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string") {
+    return forwarded.split(",")[0].trim();
+  }
+  return req.ip ?? "unknown";
+}
+
 export function createRouter(gameService: GameService): Router {
   const router = Router();
 
@@ -86,8 +94,21 @@ export function createRouter(gameService: GameService): Router {
   router.post("/session/join", async (request, response, next) => {
     try {
       const input = joinSessionSchema.parse(request.body);
-      const result = await gameService.joinSession(input);
+      const result = await gameService.joinSession({ ...input, ipAddress: extractIp(request) });
       response.status(201).json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/session/leave", async (request, response, next) => {
+    try {
+      const input = z.object({
+        code: z.string().min(6).max(6),
+        teamToken: z.string().min(1),
+      }).parse(request.body);
+      const session = await gameService.leaveSession({ ...input, ipAddress: extractIp(request) });
+      response.json({ session });
     } catch (error) {
       next(error);
     }

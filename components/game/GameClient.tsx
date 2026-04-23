@@ -59,6 +59,7 @@ export function GameClient() {
   const [wheelRotation, setWheelRotation] = useState(0);
   const [wheelAnimating, setWheelAnimating] = useState(false);
   const [nowMs, setNowMs] = useState(0);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const [draftOrder, setDraftOrder] = useState<string[]>([]);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -134,6 +135,11 @@ export function GameClient() {
     const socket = getSocket();
 
     socket.emit("session:join-room", normalizedCode);
+
+    // Register team identity for disconnect tracking
+    if (identity?.role === "team" && identity.teamId) {
+      socket.emit("session:register-team", { sessionCode: normalizedCode, teamId: identity.teamId });
+    }
 
     api
       .getSession(normalizedCode)
@@ -384,9 +390,9 @@ export function GameClient() {
     });
   }
 
-  async function handleReset(event: FormEvent) {
-    event.preventDefault();
+  async function performReset() {
     if (!identity || identity.role !== "host" || !session) return;
+    setShowResetConfirm(false);
 
     await runAction(async () => {
       const result = await api.reset({
@@ -399,7 +405,20 @@ export function GameClient() {
     }, "Đã đặt lại ván mới.");
   }
 
-  function handleLeave() {
+  function handleReset(event: FormEvent) {
+    event.preventDefault();
+    setShowResetConfirm(true);
+  }
+
+  async function handleLeave() {
+    // If team role, notify server before clearing local state
+    if (identity?.role === "team" && session) {
+      try {
+        await api.leaveSession({ code: session.code, teamToken: identity.token });
+      } catch {
+        // Best-effort: even if API fails, still clear local state
+      }
+    }
     clearIdentity();
     setIdentity(null);
     setSession(null);
@@ -440,7 +459,7 @@ export function GameClient() {
           <>
             <div className="grid gap-4 md:grid-cols-2">
             <section className="rounded-3xl border border-[#f0d4ac] bg-[#fff8ea] p-5 shadow-lg shadow-[#c79a59]/10">
-              <h2 className="mb-4 text-lg font-bold text-[#6a4a24]">Chủ phòng: Tạo phiên chơi</h2>
+                <h2 className="mb-4 text-lg font-bold text-[#6a4a24]">Chủ phòng: Tạo phòng chơi</h2>
               <form className="space-y-3" onSubmit={handleCreateSession}>
                 <input
                   type="number"
@@ -456,20 +475,20 @@ export function GameClient() {
                   disabled={loading}
                   className="w-full rounded-2xl bg-[#1f6f78] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-white transition enabled:hover:bg-[#174f56] disabled:opacity-50"
                 >
-                  Tạo phiên
+                    Tạo phòng
                 </button>
               </form>
             </section>
 
             <section className="rounded-3xl border border-[#d3e9e2] bg-[#f2fffb] p-5 shadow-lg shadow-[#6ca39b]/10">
-              <h2 className="mb-4 text-lg font-bold text-[#204f54]">Người chơi: Vào phiên</h2>
+                <h2 className="mb-4 text-lg font-bold text-[#204f54]">Người chơi: Vào phòng</h2>
               <form className="space-y-3" onSubmit={handleJoinSession}>
                 <input
                   required
                   value={joinCode}
                   onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
                   className="w-full rounded-2xl border border-[#b5d8d2] bg-white px-3 py-2 text-sm uppercase text-[#1d3c40] outline-none focus:border-[#2b9f8f]"
-                  placeholder="Mã phiên"
+                    placeholder="Mã phòng"
                 />
                 <input
                   required
@@ -483,7 +502,7 @@ export function GameClient() {
                   disabled={loading}
                   className="w-full rounded-2xl bg-[#2f9f85] px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-white transition enabled:hover:bg-[#257e69] disabled:opacity-50"
                 >
-                  Vào phiên
+                    Vào phòng
                 </button>
               </form>
             </section>
@@ -595,6 +614,32 @@ export function GameClient() {
         ) : null}
       </div>
       {identity ? <RulesModal /> : null}
+
+      {/* Reset Confirmation Modal */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-3xl bg-[#fff8ee] p-6 shadow-2xl shadow-black/40">
+            <h2 className="text-xl font-bold text-[#5f4628]">Cảnh báo đặt lại ván</h2>
+            <p className="mt-2 text-[#855f36]">
+              Bạn có chắc chắn muốn đặt lại ván mới không? Toàn bộ điểm số và tiến trình hiện tại sẽ bị xóa sạch.
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="flex-1 rounded-xl bg-[#e8d7bc] px-4 py-2 text-sm font-semibold text-[#5f4628] transition hover:bg-[#dbc4a0]"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={performReset}
+                className="flex-1 rounded-xl bg-[#cc7251] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#ad5f42]"
+              >
+                Đặt lại ngay
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

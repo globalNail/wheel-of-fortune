@@ -11,6 +11,7 @@ import { SocketRealtimeGateway } from "./infrastructure/realtime/socketRealtimeG
 import { createRouter } from "./interfaces/http/createRouter";
 
 const app = express();
+app.set("trust proxy", true);
 app.use(cors({
   origin: [
     "http://localhost:3000",
@@ -37,6 +38,7 @@ const io = new Server(server, {
 const realtimeGateway = new SocketRealtimeGateway(io);
 realtimeGateway.bindConnectionHandlers();
 gameService.setRealtimeGateway(realtimeGateway);
+realtimeGateway.setGameService(gameService);
 
 app.use("/api", createRouter(gameService));
 

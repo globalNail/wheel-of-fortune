@@ -39,6 +39,13 @@ export const api = {
     return request<{ session: PublicGameSession }>(`/session/${code}`);
   },
 
+  leaveSession(input: { code: string; teamToken: string }) {
+    return request<{ session: PublicGameSession }>("/session/leave", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
   startGame(input: { code: string; hostToken: string }) {
     return request<{ session: PublicGameSession }>("/session/start", {
       method: "POST",

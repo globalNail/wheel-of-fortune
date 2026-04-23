@@ -1,10 +1,11 @@
 export type SessionStatus = "waiting" | "playing" | "finished";
 export type GamePhase = "idle" | "spinning" | "waiting_host_guess";
 export type TimerStatus = "idle" | "running" | "paused";
+export type TeamStatus = "active" | "left";
 
 export type SegmentType = "score" | "lose-turn" | "bankrupt";
 
-export type GameEventType = "SESSION_CREATED" | "TEAM_JOINED" | "GAME_STARTED" | "TURN_CHANGED" | "SPIN" | "SPIN_START" | "SPIN_RESULT" | "GUESS" | "GUESS_RESULT" | "SOLVE" | "SOLVE_RESULT" | "RESET";
+export type GameEventType = "SESSION_CREATED" | "TEAM_JOINED" | "TEAM_LEFT" | "TEAM_REJOINED" | "GAME_STARTED" | "TURN_CHANGED" | "SPIN" | "SPIN_START" | "SPIN_RESULT" | "GUESS" | "GUESS_RESULT" | "SOLVE" | "SOLVE_RESULT" | "RESET";
 
 export interface WheelSegment {
   id: string;
@@ -18,6 +19,8 @@ export interface Team {
   name: string;
   score: number;
   order: number;
+  status: TeamStatus;
+  ipAddress: string;
 }
 
 export interface GameEvent {
@@ -76,7 +79,7 @@ export interface PublicGameSession {
   maskedPhrase: string;
   status: SessionStatus;
   gamePhase: GamePhase;
-  teams: Team[];
+  teams: Omit<Team, "ipAddress">[];
   maxTeams: number;
   currentTurnTeamId: string | null;
   guessedLetters: string[];

@@ -17,6 +17,7 @@ import type {
 import type { SessionRepository } from "../ports/sessionRepository";
 import { AppError } from "./errors";
 import type { RealtimeGateway } from "../../infrastructure/realtime/realtimeGateway";
+import { logSessionEvent } from "../../infrastructure/logger/sessionLogger";
 
 interface CreateSessionInput {
   numberOfTeams: number;
@@ -25,6 +26,7 @@ interface CreateSessionInput {
 interface JoinSessionInput {
   code: string;
   teamName: string;
+  ipAddress: string;
 }
 
 interface StartGameInput {
@@ -60,6 +62,12 @@ interface ResetInput {
   code: string;
   hostToken: string;
   numberOfTeams?: number;
+}
+
+interface LeaveInput {
+  code: string;
+  teamToken: string;
+  ipAddress: string;
 }
 
 import type { QuestionRepository } from "../ports/questionRepository";
@@ -131,17 +139,58 @@ export class GameService {
 
   async joinSession(input: JoinSessionInput): Promise<{ session: PublicGameSession; teamId: string; teamToken: string }> {
     const session = await this.requireSession(input.code);
+    const normalizedName = input.teamName.trim();
+    const ip = input.ipAddress;
+
+    if (normalizedName.length < 2 || normalizedName.length > 30) {
+      throw new AppError("Team name must be between 2 and 30 characters.");
+    }
+
+    // --- REJOIN CHECK: match by name or IP ---
+    // During "playing": check for a "left" team to rejoin
+    if (session.status === "playing") {
+      const rejoinTeam = session.teams.find(
+        (t) => t.status === "left" && (
+          t.name.toLowerCase() === normalizedName.toLowerCase() ||
+          (ip && t.ipAddress === ip)
+        )
+      );
+
+      if (rejoinTeam) {
+        rejoinTeam.status = "active";
+        rejoinTeam.ipAddress = ip;
+        this.pushEvent(session, "TEAM_REJOINED", { teamId: rejoinTeam.id, teamName: rejoinTeam.name });
+
+        const teamToken = randomUUID();
+        this.teamTokens.set(teamToken, { sessionCode: session.code, teamId: rejoinTeam.id });
+
+        session.updatedAt = new Date().toISOString();
+        await this.repository.update(session);
+        this.publishSessionState(session);
+
+        logSessionEvent(session.code, rejoinTeam.id, ip, "REJOIN", rejoinTeam.name);
+        return { session: this.toPublicSession(session), teamId: rejoinTeam.id, teamToken };
+      }
+
+      // Not a rejoin → cannot join mid-game
+      throw new AppError("Cannot join because game has already started.");
+    }
+
+    // --- PRE-GAME: status === "waiting" ---
     if (session.status !== "waiting") {
       throw new AppError("Cannot join because game has already started.");
     }
 
-    const normalizedName = input.teamName.trim();
-    if (normalizedName.length < 2 || normalizedName.length > 30) {
-      throw new AppError("Team name must be between 2 and 30 characters.");
-    }
-    if (session.teams.some((team) => team.name.toLowerCase() === normalizedName.toLowerCase())) {
+    // Check for active duplicate by name
+    if (session.teams.some((t) => t.name.toLowerCase() === normalizedName.toLowerCase())) {
       throw new AppError("Team name already exists in this session.");
     }
+
+    // Check for active duplicate by IP
+    if (ip && session.teams.some((t) => t.ipAddress === ip)) {
+      throw new AppError("A team from this device is already in the session.");
+    }
+
     if (session.teams.length >= session.maxTeams) {
       throw new AppError("Session is full.");
     }
@@ -152,6 +201,8 @@ export class GameService {
       name: normalizedName,
       score: 0,
       order: session.teams.length,
+      status: "active",
+      ipAddress: ip,
     };
     session.teams.push(team);
     session.updatedAt = new Date().toISOString();
@@ -167,6 +218,7 @@ export class GameService {
     await this.repository.update(session);
     this.publishSessionState(session);
 
+    logSessionEvent(session.code, team.id, ip, "JOIN", team.name);
     return { session: this.toPublicSession(session), teamId: team.id, teamToken };
   }
 
@@ -453,6 +505,8 @@ export class GameService {
       ...team,
       score: 0,
       order: index,
+      status: "active" as const,
+      ipAddress: team.ipAddress,
     }));
 
     this.pushEvent(session, "RESET", {
@@ -542,6 +596,115 @@ export class GameService {
     session.timerRemainingSeconds = null;
   }
 
+  async leaveSession(input: LeaveInput): Promise<PublicGameSession> {
+    const auth = this.teamTokens.get(input.teamToken);
+    if (!auth || auth.sessionCode !== input.code.toUpperCase()) {
+      throw new AppError("Team authorization failed.", 403);
+    }
+
+    const session = await this.requireSession(input.code);
+    const team = session.teams.find((t) => t.id === auth.teamId);
+    if (!team) {
+      throw new AppError("Team not found.", 404);
+    }
+    if (team.status === "left") {
+      this.teamTokens.delete(input.teamToken);
+      return this.toPublicSession(session);
+    }
+
+    const teamName = team.name;
+    const teamId = team.id;
+
+    // --- PRE-GAME: Remove player entirely to free the slot ---
+    if (session.status === "waiting") {
+      session.teams = session.teams.filter((t) => t.id !== teamId);
+      // Re-index order
+      session.teams.forEach((t, i) => { t.order = i; });
+      this.pushEvent(session, "TEAM_LEFT", { teamId, teamName, removedFromSession: true });
+      logSessionEvent(session.code, teamId, input.ipAddress, "REMOVED", teamName);
+    } else {
+      // --- IN-GAME: Mark as left, keep slot ---
+      team.status = "left";
+      this.pushEvent(session, "TEAM_LEFT", { teamId, teamName });
+      logSessionEvent(session.code, teamId, input.ipAddress, "LEAVE", teamName);
+
+      if (session.currentTurnTeamId === teamId) {
+        session.pendingWheelValue = null;
+        this.advanceTurn(session, "PLAYER_LEFT");
+      }
+
+      const activeTeams = session.teams.filter((t) => t.status === "active");
+      if (activeTeams.length === 0) {
+        session.status = "finished";
+        session.gamePhase = "idle";
+        session.timerStatus = "idle";
+        session.timerEndsAt = null;
+        session.timerRemainingSeconds = null;
+        session.currentTurnTeamId = null;
+      }
+    }
+
+    this.teamTokens.delete(input.teamToken);
+
+    session.updatedAt = new Date().toISOString();
+    await this.repository.update(session);
+    this.publishSessionState(session);
+
+    return this.toPublicSession(session);
+  }
+
+  /** Called by WebSocket gateway on disconnect. Returns the teamToken→teamId mapping for socket tracking. */
+  getTeamTokenMapping(teamToken: string): { sessionCode: string; teamId: string } | null {
+    return this.teamTokens.get(teamToken) ?? null;
+  }
+
+  /** Mark a team as left by teamId (used for disconnect handling). */
+  async markTeamAsLeft(sessionCode: string, teamId: string): Promise<void> {
+    let session: GameSession;
+    try {
+      session = await this.requireSession(sessionCode);
+    } catch {
+      return; // session already gone
+    }
+
+    const team = session.teams.find((t) => t.id === teamId);
+    if (!team || team.status === "left") {
+      return;
+    }
+
+    // PRE-GAME disconnect: remove player entirely
+    if (session.status === "waiting") {
+      session.teams = session.teams.filter((t) => t.id !== teamId);
+      session.teams.forEach((t, i) => { t.order = i; });
+      this.pushEvent(session, "TEAM_LEFT", { teamId, teamName: team.name, removedFromSession: true });
+      logSessionEvent(sessionCode, teamId, team.ipAddress, "DISCONNECT", `${team.name} (removed, pre-game)`);
+    } else {
+      // IN-GAME disconnect: mark as left
+      team.status = "left";
+      this.pushEvent(session, "TEAM_LEFT", { teamId, teamName: team.name });
+      logSessionEvent(sessionCode, teamId, team.ipAddress, "DISCONNECT", team.name);
+
+      if (session.status === "playing" && session.currentTurnTeamId === teamId) {
+        session.pendingWheelValue = null;
+        this.advanceTurn(session, "PLAYER_LEFT");
+      }
+
+      const activeTeams = session.teams.filter((t) => t.status === "active");
+      if (session.status === "playing" && activeTeams.length === 0) {
+        session.status = "finished";
+        session.gamePhase = "idle";
+        session.timerStatus = "idle";
+        session.timerEndsAt = null;
+        session.timerRemainingSeconds = null;
+        session.currentTurnTeamId = null;
+      }
+    }
+
+    session.updatedAt = new Date().toISOString();
+    await this.repository.update(session);
+    this.publishSessionState(session);
+  }
+
   async getSession(code: string): Promise<PublicGameSession> {
     const session = await this.requireSession(code);
     return this.toPublicSession(session);
@@ -614,6 +777,9 @@ export class GameService {
     if (!team) {
       throw new AppError("Team not found.", 404);
     }
+    if (team.status === "left") {
+      throw new AppError("Team has left the session.", 403);
+    }
     if (session.currentTurnTeamId !== team.id) {
       throw new AppError("Only the current team can perform this action.", 403);
     }
@@ -644,7 +810,9 @@ export class GameService {
 
   private advanceTurn(session: GameSession, reason: string): void {
     const orderedTeams = this.getTeamsInTurnOrder(session);
-    if (!orderedTeams.length) {
+    const activeTeams = orderedTeams.filter((t) => t.status === "active");
+
+    if (!activeTeams.length) {
       session.currentTurnTeamId = null;
       session.timerEndsAt = null;
       session.timerStatus = "idle";
@@ -653,11 +821,11 @@ export class GameService {
     }
 
     if (!session.currentTurnTeamId) {
-      session.currentTurnTeamId = orderedTeams[0].id;
+      session.currentTurnTeamId = activeTeams[0].id;
     } else {
-      const currentIndex = orderedTeams.findIndex((team) => team.id === session.currentTurnTeamId);
-      const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % orderedTeams.length;
-      session.currentTurnTeamId = orderedTeams[nextIndex].id;
+      const currentIndex = activeTeams.findIndex((team) => team.id === session.currentTurnTeamId);
+      const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % activeTeams.length;
+      session.currentTurnTeamId = activeTeams[nextIndex].id;
     }
 
     this.resetTimerAndStart(session);
@@ -747,7 +915,7 @@ export class GameService {
       maskedPhrase: session.maskedPhrase,
       status: session.status,
       gamePhase: session.gamePhase,
-      teams: this.getTeamsInTurnOrder(session),
+      teams: this.getTeamsInTurnOrder(session).map(({ ipAddress, ...rest }) => rest),
       maxTeams: session.maxTeams,
       currentTurnTeamId: session.currentTurnTeamId,
       guessedLetters: [...session.guessedLetters],

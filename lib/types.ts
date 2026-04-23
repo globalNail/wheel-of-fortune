@@ -1,6 +1,7 @@
 export type SessionStatus = "waiting" | "playing" | "finished";
 export type GamePhase = "idle" | "spinning" | "waiting_host_guess";
 export type TimerStatus = "idle" | "running" | "paused";
+export type TeamStatus = "active" | "left";
 
 export type SegmentType = "score" | "lose-turn" | "bankrupt";
 
@@ -16,6 +17,7 @@ export interface Team {
   name: string;
   score: number;
   order: number;
+  status: TeamStatus;
 }
 
 export interface GameEvent {
