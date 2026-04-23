@@ -1,26 +1,64 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f3ead8;
+  --foreground: #2b2418;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: var(--font-bricolage);
+  --font-mono: var(--font-space-mono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-bricolage), sans-serif;
+}
+
+.confetti-overlay {
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle at 10% 20%, rgba(255, 125, 65, 0.35) 0 4px, transparent 4px),
+    radial-gradient(circle at 75% 35%, rgba(52, 188, 173, 0.3) 0 5px, transparent 5px),
+    radial-gradient(circle at 35% 80%, rgba(249, 182, 89, 0.35) 0 4px, transparent 4px),
+    radial-gradient(circle at 60% 70%, rgba(58, 111, 168, 0.2) 0 5px, transparent 5px);
+  animation: confetti-drift 8s linear infinite;
+}
+
+@keyframes confetti-drift {
+  0% {
+    transform: translateY(-8%) translateX(0%);
+  }
+  50% {
+    transform: translateY(6%) translateX(1%);
+  }
+  100% {
+    transform: translateY(-8%) translateX(0%);
+  }
+}
+
+@keyframes blink {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes toast-in {
+  0% {
+    opacity: 0;
+    transform: translateX(12px) translateY(-4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) translateY(0);
+  }
 }

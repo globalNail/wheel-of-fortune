@@ -1,36 +1,185 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Wheel Of Fortune Realtime System
 
-## Getting Started
+Complete fullstack game application similar to "Wheel of Fortune" (Vietnamese game-show style), built with:
 
-First, run the development server:
+- Frontend: Next.js + TypeScript + TailwindCSS
+- Backend: Node.js + Express + Socket.IO
+- Realtime: WebSocket events via Socket.IO
+- Architecture: Clean Architecture style layering in backend
+
+## 1) Folder Structure
+
+```text
+.
+|-- app/
+|   |-- globals.css
+|   |-- layout.tsx
+|   `-- page.tsx
+|-- components/
+|   `-- game/
+|       |-- ActionPanel.tsx
+|       |-- EventFeed.tsx
+|       |-- GameClient.tsx
+|       |-- PhraseBoard.tsx
+|       |-- Scoreboard.tsx
+|       |-- TopBar.tsx
+|       `-- Wheel.tsx
+|-- lib/
+|   |-- api.ts
+|   |-- config.ts
+|   |-- socket.ts
+|   |-- storage.ts
+|   |-- types.ts
+|   `-- wheel.ts
+|-- backend/
+|   |-- db/
+|   |   `-- schema.sql
+|   `-- src/
+|       |-- application/
+|       |   |-- ports/
+|       |   |   `-- sessionRepository.ts
+|       |   `-- services/
+|       |       |-- errors.ts
+|       |       `-- gameService.ts
+|       |-- config/
+|       |   `-- env.ts
+|       |-- domain/
+|       |   |-- constants.ts
+|       |   `-- gameTypes.ts
+|       |-- infrastructure/
+|       |   |-- realtime/
+|       |   |   |-- realtimeGateway.ts
+|       |   |   `-- socketRealtimeGateway.ts
+|       |   `-- repositories/
+|       |       `-- inMemorySessionRepository.ts
+|       |-- interfaces/
+|       |   `-- http/
+|       |       `-- createRouter.ts
+|       `-- server.ts
+|-- .env.example
+`-- package.json
+```
+
+## 2) Backend Design (Clean Architecture)
+
+### Domain
+
+- `backend/src/domain/gameTypes.ts`: core entities and DTOs (`GameSession`, `Team`, `GameEvent`)
+- `backend/src/domain/constants.ts`: wheel segments and game constants
+
+### Application
+
+- `backend/src/application/services/gameService.ts`: business rules
+  - create/join/start/reset sessions
+  - turn system and timer timeout
+  - spin/guess/buy-vowel/solve logic
+  - anti-cheat checks: only current team can act
+  - letter duplication guard
+  - score and phrase updates
+
+### Infrastructure
+
+- `backend/src/infrastructure/repositories/inMemorySessionRepository.ts`: repository implementation
+- `backend/src/infrastructure/realtime/socketRealtimeGateway.ts`: Socket.IO event publishing and room handling
+
+### Interface Layer
+
+- `backend/src/interfaces/http/createRouter.ts`: REST routes + payload validation with Zod
+
+## 3) Database Schema
+
+The SQL schema is provided in `backend/db/schema.sql` and includes:
+
+- `sessions`
+- `teams`
+- `game_events`
+
+This schema can be used with PostgreSQL when replacing the in-memory repository with a persistent adapter.
+
+## 4) API Endpoints
+
+Base URL: `http://localhost:4000/api`
+
+- `POST /session/create`
+- `POST /session/join`
+- `GET /session/:code`
+- `POST /session/start`
+- `POST /session/set-turn-order`
+- `POST /game/spin`
+- `POST /game/guess`
+- `POST /game/buy-vowel`
+- `POST /game/solve`
+- `POST /game/reset`
+
+## 5) Realtime Events
+
+Socket room events per session code:
+
+- `sessionState`
+- `onScoreUpdate`
+- `onTurnChange`
+- `onPhraseUpdate`
+- `onWheelResult`
+
+Client commands:
+
+- `session:join-room`
+- `session:leave-room`
+
+## 6) Security and Validation
+
+- Host-only actions validated by `hostToken`
+- Team actions validated by `teamToken`
+- Only `currentTurnTeamId` can spin/guess/solve/buy-vowel
+- Duplicate guessed letters blocked
+- Buy vowel requires enough score
+- Session code and payload shape validated by Zod
+
+## 7) Frontend UX
+
+- Split layout:
+  - Left: wheel, phrase board, team actions
+  - Right: realtime scoreboard, ranking, event feed
+  - Top: session code, status, role, timer, leave control
+- Animated wheel spin
+- Realtime sync through Socket.IO
+- Winner celebration banner with confetti overlay
+- Host controls for start/reset and turn-order arrangement
+
+## 8) Run Instructions
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+1. Configure environment:
+
+```bash
+cp .env.example .env
+```
+
+On Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+1. Start frontend + backend together:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+1. Open app:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Frontend: <http://localhost:3000>
+- Backend health: <http://localhost:4000/api/health>
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 9) Suggested Production Next Steps
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Replace in-memory repository with PostgreSQL repository (schema already included)
+- Add JWT auth for host/team identity
+- Add integration tests for full game flow
+- Add Redis pub/sub for horizontal socket scaling
