@@ -15,7 +15,7 @@ app.set("trust proxy", true);
 app.use(cors({
   origin: [
     "http://localhost:3000",
-    "https://wof-rho.vercel.app",
+    "https://wof-vnr.vercel.app",
   ],
 }));
 app.use(express.json());
@@ -29,7 +29,7 @@ const io = new Server(server, {
   cors: {
     origin: [
       "http://localhost:3000",
-      "https://wof-rho.vercel.app",
+      "https://wof-vnr.vercel.app",
     ],
     methods: ["GET", "POST"],
   },

@@ -150,10 +150,7 @@ export class GameService {
     // During "playing": check for a "left" team to rejoin
     if (session.status === "playing") {
       const rejoinTeam = session.teams.find(
-        (t) => t.status === "left" && (
-          t.name.toLowerCase() === normalizedName.toLowerCase() ||
-          (ip && t.ipAddress === ip)
-        )
+        (t) => t.status === "left" && t.name.toLowerCase() === normalizedName.toLowerCase()
       );
 
       if (rejoinTeam) {
@@ -187,9 +184,9 @@ export class GameService {
     }
 
     // Check for active duplicate by IP
-    if (ip && session.teams.some((t) => t.ipAddress === ip)) {
-      throw new AppError("A team from this device is already in the session.");
-    }
+    // if (ip && session.teams.some((t) => t.ipAddress === ip)) {
+    //   throw new AppError("A team from this device is already in the session.");
+    // }
 
     if (session.teams.length >= session.maxTeams) {
       throw new AppError("Session is full.");
