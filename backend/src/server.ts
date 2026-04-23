@@ -10,7 +10,12 @@ import { SocketRealtimeGateway } from "./infrastructure/realtime/socketRealtimeG
 import { createRouter } from "./interfaces/http/createRouter";
 
 const app = express();
-app.use(cors({ origin: env.CORS_ORIGIN }));
+app.use(cors({
+  origin: [
+    "http://localhost:3000",
+    "https://wof-rho.vercel.app",
+  ],
+}));
 app.use(express.json());
 
 const repository = new InMemorySessionRepository();
@@ -19,7 +24,10 @@ const gameService = new GameService(repository);
 const server = createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: env.CORS_ORIGIN,
+    origin: [
+      "http://localhost:3000",
+      "https://wof-rho.vercel.app",
+    ],
     methods: ["GET", "POST"],
   },
 });

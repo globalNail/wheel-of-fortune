@@ -2,7 +2,7 @@ import { API_BASE_URL } from "./config";
 import type { CreateSessionResponse, JoinSessionResponse, PublicGameSession, WheelSegment } from "./types";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${API_BASE_URL}/api${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
