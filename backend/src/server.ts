@@ -6,6 +6,7 @@ import { Server } from "socket.io";
 import { GameService } from "./application/services/gameService";
 import { env } from "./config/env";
 import { InMemorySessionRepository } from "./infrastructure/repositories/inMemorySessionRepository";
+import { JsonQuestionRepository } from "./infrastructure/repositories/jsonQuestionRepository";
 import { SocketRealtimeGateway } from "./infrastructure/realtime/socketRealtimeGateway";
 import { createRouter } from "./interfaces/http/createRouter";
 
@@ -19,7 +20,8 @@ app.use(cors({
 app.use(express.json());
 
 const repository = new InMemorySessionRepository();
-const gameService = new GameService(repository);
+const questionRepository = new JsonQuestionRepository();
+const gameService = new GameService(repository, questionRepository);
 
 const server = createServer(app);
 const io = new Server(server, {

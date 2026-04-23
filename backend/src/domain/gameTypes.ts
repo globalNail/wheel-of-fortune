@@ -1,8 +1,10 @@
 export type SessionStatus = "waiting" | "playing" | "finished";
+export type GamePhase = "idle" | "spinning" | "waiting_host_guess";
+export type TimerStatus = "idle" | "running" | "paused";
 
 export type SegmentType = "score" | "lose-turn" | "bankrupt";
 
-export type GameEventType = "SESSION_CREATED" | "TEAM_JOINED" | "GAME_STARTED" | "TURN_CHANGED" | "SPIN" | "GUESS" | "BUY_VOWEL" | "SOLVE" | "RESET";
+export type GameEventType = "SESSION_CREATED" | "TEAM_JOINED" | "GAME_STARTED" | "TURN_CHANGED" | "SPIN" | "SPIN_START" | "SPIN_RESULT" | "GUESS" | "GUESS_RESULT" | "SOLVE" | "SOLVE_RESULT" | "RESET";
 
 export interface WheelSegment {
   id: string;
@@ -25,13 +27,21 @@ export interface GameEvent {
   timestamp: string;
 }
 
+export interface Question {
+  id: string;
+  question: string;
+  answer: string;
+}
+
 export interface GameSession {
   id: string;
   code: string;
   phrase: string;
-  category?: string;
+  question: string;
+  usedQuestionIds: string[];
   maskedPhrase: string;
   status: SessionStatus;
+  gamePhase: GamePhase;
   maxTeams: number;
   hostToken: string;
   teams: Team[];
@@ -44,7 +54,9 @@ export interface GameSession {
   solveBonus: number;
   vowelCost: number;
   turnDurationSeconds: number;
-  turnEndsAt: string | null;
+  timerStatus: TimerStatus;
+  timerEndsAt: number | null;
+  timerRemainingSeconds: number | null;
   createdAt: string;
   updatedAt: string;
   events: GameEvent[];
@@ -60,9 +72,10 @@ export interface PlayerIdentity {
 export interface PublicGameSession {
   id: string;
   code: string;
-  category?: string;
+  question: string;
   maskedPhrase: string;
   status: SessionStatus;
+  gamePhase: GamePhase;
   teams: Team[];
   maxTeams: number;
   currentTurnTeamId: string | null;
@@ -74,6 +87,8 @@ export interface PublicGameSession {
   solveBonus: number;
   vowelCost: number;
   turnDurationSeconds: number;
-  turnEndsAt: string | null;
+  timerStatus: TimerStatus;
+  timerEndsAt: number | null;
+  timerRemainingSeconds: number | null;
   events: GameEvent[];
 }

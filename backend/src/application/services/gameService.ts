@@ -19,8 +19,6 @@ import { AppError } from "./errors";
 import type { RealtimeGateway } from "../../infrastructure/realtime/realtimeGateway";
 
 interface CreateSessionInput {
-  phrase: string;
-  category?: string;
   numberOfTeams: number;
 }
 
@@ -45,43 +43,48 @@ interface TeamActionInput {
   teamToken: string;
 }
 
-interface GuessInput extends TeamActionInput {
+interface HostActionInput {
+  code: string;
+  hostToken: string;
+}
+
+interface GuessInput extends HostActionInput {
   letter: string;
 }
 
-interface BuyVowelInput extends TeamActionInput {
-  letter: string;
-}
-
-interface SolveInput extends TeamActionInput {
+interface SolveInput extends HostActionInput {
   attempt: string;
 }
 
 interface ResetInput {
   code: string;
   hostToken: string;
-  phrase: string;
-  category?: string;
   numberOfTeams?: number;
 }
+
+import type { QuestionRepository } from "../ports/questionRepository";
 
 export class GameService {
   private readonly teamTokens = new Map<string, { sessionCode: string; teamId: string }>();
   private realtimeGateway: RealtimeGateway | null = null;
 
-  constructor(private readonly repository: SessionRepository) {}
+  constructor(
+    private readonly repository: SessionRepository,
+    private readonly questionRepository: QuestionRepository
+  ) {}
 
   setRealtimeGateway(gateway: RealtimeGateway): void {
     this.realtimeGateway = gateway;
   }
 
   async createSession(input: CreateSessionInput): Promise<{ session: PublicGameSession; code: string; hostToken: string }> {
-    const phrase = input.phrase.trim();
-    if (phrase.length < 2) {
-      throw new AppError("Phrase must contain at least 2 characters.");
-    }
     if (input.numberOfTeams < 2 || input.numberOfTeams > 8) {
       throw new AppError("Number of teams must be between 2 and 8.");
+    }
+
+    const questionData = await this.questionRepository.getNextQuestion([]);
+    if (!questionData) {
+      throw new AppError("No questions available in the dataset.");
     }
 
     const code = await this.generateUniqueSessionCode();
@@ -90,10 +93,12 @@ export class GameService {
     const session: GameSession = {
       id: randomUUID(),
       code,
-      phrase,
-      category: input.category?.trim() || undefined,
-      maskedPhrase: this.createMaskedPhrase(phrase, []),
+      phrase: questionData.answer,
+      question: questionData.question,
+      usedQuestionIds: [questionData.id],
+      maskedPhrase: this.createMaskedPhrase(questionData.answer, []),
       status: "waiting",
+      gamePhase: "idle",
       maxTeams: input.numberOfTeams,
       hostToken,
       teams: [],
@@ -106,7 +111,9 @@ export class GameService {
       solveBonus: DEFAULT_SOLVE_BONUS,
       vowelCost: DEFAULT_VOWEL_COST,
       turnDurationSeconds: DEFAULT_TURN_DURATION_SECONDS,
-      turnEndsAt: null,
+      timerStatus: "idle",
+      timerEndsAt: null,
+      timerRemainingSeconds: null,
       createdAt: now,
       updatedAt: now,
       events: [],
@@ -115,7 +122,7 @@ export class GameService {
     this.pushEvent(session, "SESSION_CREATED", {
       code: session.code,
       maxTeams: session.maxTeams,
-      category: session.category,
+      question: session.question,
     });
 
     await this.repository.create(session);
@@ -180,8 +187,9 @@ export class GameService {
     }
 
     session.status = "playing";
+    session.gamePhase = "idle";
     session.currentTurnTeamId = firstTeam.id;
-    session.turnEndsAt = this.nextTurnDeadline(session.turnDurationSeconds);
+    this.resetTimerAndStart(session);
     session.updatedAt = new Date().toISOString();
     this.pushEvent(session, "GAME_STARTED", { firstTeamId: firstTeam.id });
 
@@ -232,9 +240,12 @@ export class GameService {
     if (session.status !== "playing") {
       throw new AppError("Game is not active.");
     }
-    if (session.pendingWheelValue !== null) {
-      throw new AppError("You must finish your guess before spinning again.");
+    if (session.gamePhase !== "idle") {
+      throw new AppError("Action locked: currently " + session.gamePhase);
     }
+
+    session.gamePhase = "spinning";
+    this.pushEvent(session, "SPIN_START", { teamId: team.id });
 
     const segmentIndex = Math.floor(Math.random() * WHEEL_SEGMENTS.length);
     const segment = WHEEL_SEGMENTS[segmentIndex];
@@ -243,7 +254,8 @@ export class GameService {
 
     if (segment.type === "score" && segment.value) {
       session.pendingWheelValue = segment.value;
-      this.pushEvent(session, "SPIN", {
+      session.gamePhase = "waiting_host_guess";
+      this.pushEvent(session, "SPIN_RESULT", {
         teamId: team.id,
         result: segment.label,
         type: "score",
@@ -254,7 +266,7 @@ export class GameService {
     if (segment.type === "lose-turn") {
       session.pendingWheelValue = null;
       this.advanceTurn(session, "LOSE_TURN");
-      this.pushEvent(session, "SPIN", {
+      this.pushEvent(session, "SPIN_RESULT", {
         teamId: team.id,
         result: segment.label,
         type: "lose-turn",
@@ -268,7 +280,7 @@ export class GameService {
       }
       session.pendingWheelValue = null;
       this.advanceTurn(session, "BANKRUPT");
-      this.pushEvent(session, "SPIN", {
+      this.pushEvent(session, "SPIN_RESULT", {
         teamId: team.id,
         result: segment.label,
         type: "bankrupt",
@@ -291,22 +303,23 @@ export class GameService {
     };
   }
 
-  async guessConsonant(input: GuessInput): Promise<PublicGameSession> {
+  async guessLetter(input: GuessInput): Promise<PublicGameSession> {
     const session = await this.requireSession(input.code);
-    const team = this.requireCurrentTeamByToken(session, input.teamToken);
+    this.requireHost(session, input.hostToken);
 
     if (session.status !== "playing") {
       throw new AppError("Game is not active.");
     }
-    if (session.pendingWheelValue === null) {
-      throw new AppError("You need to spin before guessing a consonant.");
+    if (session.gamePhase !== "waiting_host_guess") {
+      throw new AppError("Action locked: currently " + session.gamePhase);
+    }
+
+    const currentTeam = session.teams.find((item) => item.id === session.currentTurnTeamId);
+    if (!currentTeam) {
+      throw new AppError("No active team.");
     }
 
     const letter = this.normalizeLetter(input.letter);
-    if (VOWELS.has(letter)) {
-      throw new AppError("Use buy vowel action for vowels.");
-    }
-
     this.ensureLetterAvailable(session, letter);
 
     const occurrences = this.countOccurrences(session.phrase, letter);
@@ -314,20 +327,19 @@ export class GameService {
     session.maskedPhrase = this.createMaskedPhrase(session.phrase, session.guessedLetters);
 
     if (occurrences > 0) {
-      const scoreAward = occurrences * session.pendingWheelValue;
-      const targetTeam = session.teams.find((item) => item.id === team.id);
-      if (targetTeam) {
-        targetTeam.score += scoreAward;
-      }
-      this.pushEvent(session, "GUESS", {
-        teamId: team.id,
+      const scoreAward = occurrences * session.pendingWheelValue!;
+      currentTeam.score += scoreAward;
+      this.resetTimerAndStart(session);
+      session.gamePhase = "idle";
+      this.pushEvent(session, "GUESS_RESULT", {
+        teamId: currentTeam.id,
         letter,
         occurrences,
         scoreAward,
       });
     } else {
-      this.pushEvent(session, "GUESS", {
-        teamId: team.id,
+      this.pushEvent(session, "GUESS_RESULT", {
+        teamId: currentTeam.id,
         letter,
         occurrences,
       });
@@ -335,7 +347,7 @@ export class GameService {
     }
 
     session.pendingWheelValue = null;
-    this.applySolvedStateIfComplete(session, team.id);
+    this.applySolvedStateIfComplete(session, currentTeam.id);
     session.updatedAt = new Date().toISOString();
 
     await this.repository.update(session);
@@ -346,66 +358,22 @@ export class GameService {
     return this.toPublicSession(session);
   }
 
-  async buyVowel(input: BuyVowelInput): Promise<PublicGameSession> {
-    const session = await this.requireSession(input.code);
-    const team = this.requireCurrentTeamByToken(session, input.teamToken);
 
-    if (session.status !== "playing") {
-      throw new AppError("Game is not active.");
-    }
-    if (session.pendingWheelValue !== null) {
-      throw new AppError("Resolve current wheel spin before buying a vowel.");
-    }
-
-    const letter = this.normalizeLetter(input.letter);
-    if (!VOWELS.has(letter)) {
-      throw new AppError("Only vowels can be bought.");
-    }
-
-    this.ensureLetterAvailable(session, letter);
-
-    const currentTeam = session.teams.find((item) => item.id === team.id);
-    if (!currentTeam) {
-      throw new AppError("Team not found.", 404);
-    }
-    if (currentTeam.score < session.vowelCost) {
-      throw new AppError("Not enough score to buy a vowel.");
-    }
-
-    currentTeam.score -= session.vowelCost;
-
-    const occurrences = this.countOccurrences(session.phrase, letter);
-    session.guessedLetters.push(letter);
-    session.maskedPhrase = this.createMaskedPhrase(session.phrase, session.guessedLetters);
-
-    if (occurrences === 0) {
-      this.advanceTurn(session, "WRONG_VOWEL");
-    }
-
-    this.pushEvent(session, "BUY_VOWEL", {
-      teamId: team.id,
-      letter,
-      occurrences,
-      cost: session.vowelCost,
-    });
-
-    this.applySolvedStateIfComplete(session, team.id);
-    session.updatedAt = new Date().toISOString();
-
-    await this.repository.update(session);
-    this.publishPhraseUpdate(session);
-    this.publishScoreUpdate(session);
-    this.publishSessionState(session);
-
-    return this.toPublicSession(session);
-  }
 
   async solve(input: SolveInput): Promise<PublicGameSession> {
     const session = await this.requireSession(input.code);
-    const team = this.requireCurrentTeamByToken(session, input.teamToken);
+    this.requireHost(session, input.hostToken);
 
     if (session.status !== "playing") {
       throw new AppError("Game is not active.");
+    }
+    if (session.gamePhase !== "waiting_host_guess") {
+      throw new AppError("Action locked: currently " + session.gamePhase);
+    }
+
+    const currentTeam = session.teams.find((item) => item.id === session.currentTurnTeamId);
+    if (!currentTeam) {
+      throw new AppError("No active team.");
     }
 
     const attempt = input.attempt.trim();
@@ -415,25 +383,24 @@ export class GameService {
 
     const isCorrect = this.normalizePhrase(attempt) === this.normalizePhrase(session.phrase);
     if (isCorrect) {
-      const currentTeam = session.teams.find((item) => item.id === team.id);
-      if (!currentTeam) {
-        throw new AppError("Team not found.", 404);
-      }
       currentTeam.score += session.solveBonus;
       session.maskedPhrase = this.createMaskedPhrase(session.phrase, this.extractUniqueLetters(session.phrase));
       session.status = "finished";
-      session.winnerTeamId = team.id;
+      session.gamePhase = "idle";
+      session.winnerTeamId = currentTeam.id;
       session.pendingWheelValue = null;
-      session.turnEndsAt = null;
+      session.timerStatus = "idle";
+      session.timerEndsAt = null;
+      session.timerRemainingSeconds = null;
     } else {
       session.pendingWheelValue = null;
       this.advanceTurn(session, "WRONG_SOLVE");
     }
 
-    this.pushEvent(session, "SOLVE", {
-      teamId: team.id,
-      isCorrect,
-    });
+    this.pushEvent(session, "SOLVE_RESULT", {
+        teamId: currentTeam.id,
+        isCorrect,
+      });
 
     session.updatedAt = new Date().toISOString();
     await this.repository.update(session);
@@ -449,11 +416,6 @@ export class GameService {
     const session = await this.requireSession(input.code);
     this.requireHost(session, input.hostToken);
 
-    const phrase = input.phrase.trim();
-    if (phrase.length < 2) {
-      throw new AppError("Phrase must contain at least 2 characters.");
-    }
-
     if (input.numberOfTeams !== undefined) {
       if (input.numberOfTeams < session.teams.length || input.numberOfTeams > 8 || input.numberOfTeams < 2) {
         throw new AppError("New team count must be between current team amount and 8.");
@@ -461,17 +423,31 @@ export class GameService {
       session.maxTeams = input.numberOfTeams;
     }
 
-    session.phrase = phrase;
-    session.category = input.category?.trim() || undefined;
-    session.maskedPhrase = this.createMaskedPhrase(phrase, []);
+    let questionData = await this.questionRepository.getNextQuestion(session.usedQuestionIds);
+    if (!questionData) {
+      // If we run out of questions, reset the used list and try again
+      session.usedQuestionIds = [];
+      questionData = await this.questionRepository.getNextQuestion([]);
+      if (!questionData) {
+        throw new AppError("No questions available in the dataset.");
+      }
+    }
+
+    session.phrase = questionData.answer;
+    session.question = questionData.question;
+    session.usedQuestionIds.push(questionData.id);
+    session.maskedPhrase = this.createMaskedPhrase(questionData.answer, []);
     session.status = "waiting";
+    session.gamePhase = "idle";
     session.currentTurnTeamId = null;
     session.guessedLetters = [];
     session.pendingWheelValue = null;
     session.lastWheelSegmentId = null;
     session.lastWheelResultLabel = null;
     session.winnerTeamId = null;
-    session.turnEndsAt = null;
+    session.timerStatus = "idle";
+    session.timerEndsAt = null;
+    session.timerRemainingSeconds = null;
 
     session.teams = this.getTeamsInTurnOrder(session).map((team, index) => ({
       ...team,
@@ -481,7 +457,7 @@ export class GameService {
 
     this.pushEvent(session, "RESET", {
       maxTeams: session.maxTeams,
-      category: session.category,
+      question: session.question,
     });
 
     session.updatedAt = new Date().toISOString();
@@ -489,6 +465,81 @@ export class GameService {
     this.publishSessionState(session);
 
     return this.toPublicSession(session);
+  }
+
+  async nextTurn(input: HostActionInput): Promise<PublicGameSession> {
+    const session = await this.requireSession(input.code);
+    this.requireHost(session, input.hostToken);
+
+    this.advanceTurn(session, "HOST_FORCED");
+    session.pendingWheelValue = null;
+    session.updatedAt = new Date().toISOString();
+    await this.repository.update(session);
+    this.publishTurnChange(session);
+    this.publishSessionState(session);
+
+    return this.toPublicSession(session);
+  }
+
+  async setTimer(input: HostActionInput & { seconds: number }): Promise<PublicGameSession> {
+    const session = await this.requireSession(input.code);
+    this.requireHost(session, input.hostToken);
+
+    if (input.seconds < 5) {
+      throw new AppError("Timer must be at least 5 seconds.");
+    }
+    session.turnDurationSeconds = input.seconds;
+    if (session.timerStatus !== "running") {
+      session.timerRemainingSeconds = input.seconds;
+    }
+    
+    session.updatedAt = new Date().toISOString();
+    await this.repository.update(session);
+    this.publishSessionState(session);
+    return this.toPublicSession(session);
+  }
+
+  async startTimer(input: HostActionInput): Promise<PublicGameSession> {
+    const session = await this.requireSession(input.code);
+    this.requireHost(session, input.hostToken);
+
+    if (session.timerStatus === "running") {
+      return this.toPublicSession(session);
+    }
+
+    const remaining = session.timerRemainingSeconds ?? session.turnDurationSeconds;
+    session.timerStatus = "running";
+    session.timerEndsAt = Date.now() + remaining * 1000;
+    session.timerRemainingSeconds = null;
+
+    session.updatedAt = new Date().toISOString();
+    await this.repository.update(session);
+    this.publishSessionState(session);
+    return this.toPublicSession(session);
+  }
+
+  async stopTimer(input: HostActionInput): Promise<PublicGameSession> {
+    const session = await this.requireSession(input.code);
+    this.requireHost(session, input.hostToken);
+
+    if (session.timerStatus !== "running" || !session.timerEndsAt) {
+      return this.toPublicSession(session);
+    }
+
+    session.timerRemainingSeconds = Math.max(0, Math.ceil((session.timerEndsAt - Date.now()) / 1000));
+    session.timerStatus = "paused";
+    session.timerEndsAt = null;
+
+    session.updatedAt = new Date().toISOString();
+    await this.repository.update(session);
+    this.publishSessionState(session);
+    return this.toPublicSession(session);
+  }
+
+  private resetTimerAndStart(session: GameSession): void {
+    session.timerStatus = "running";
+    session.timerEndsAt = Date.now() + session.turnDurationSeconds * 1000;
+    session.timerRemainingSeconds = null;
   }
 
   async getSession(code: string): Promise<PublicGameSession> {
@@ -501,11 +552,11 @@ export class GameService {
     const nowMs = Date.now();
 
     for (const session of sessions) {
-      if (session.status !== "playing" || !session.turnEndsAt || !session.currentTurnTeamId) {
+      if (session.status !== "playing" || session.timerStatus !== "running" || !session.timerEndsAt || !session.currentTurnTeamId) {
         continue;
       }
 
-      if (new Date(session.turnEndsAt).getTime() >= nowMs) {
+      if (session.timerEndsAt >= nowMs) {
         continue;
       }
 
@@ -595,7 +646,9 @@ export class GameService {
     const orderedTeams = this.getTeamsInTurnOrder(session);
     if (!orderedTeams.length) {
       session.currentTurnTeamId = null;
-      session.turnEndsAt = null;
+      session.timerEndsAt = null;
+      session.timerStatus = "idle";
+      session.timerRemainingSeconds = null;
       return;
     }
 
@@ -607,7 +660,8 @@ export class GameService {
       session.currentTurnTeamId = orderedTeams[nextIndex].id;
     }
 
-    session.turnEndsAt = this.nextTurnDeadline(session.turnDurationSeconds);
+    this.resetTimerAndStart(session);
+    session.gamePhase = "idle";
     this.pushEvent(session, "TURN_CHANGED", {
       reason,
       currentTurnTeamId: session.currentTurnTeamId,
@@ -622,7 +676,9 @@ export class GameService {
 
     session.status = "finished";
     session.winnerTeamId = teamId;
-    session.turnEndsAt = null;
+    session.timerEndsAt = null;
+    session.timerStatus = "idle";
+    session.timerRemainingSeconds = null;
   }
 
   private createMaskedPhrase(phrase: string, guessedLetters: string[]): string {
@@ -687,9 +743,10 @@ export class GameService {
     return {
       id: session.id,
       code: session.code,
-      category: session.category,
+      question: session.question,
       maskedPhrase: session.maskedPhrase,
       status: session.status,
+      gamePhase: session.gamePhase,
       teams: this.getTeamsInTurnOrder(session),
       maxTeams: session.maxTeams,
       currentTurnTeamId: session.currentTurnTeamId,
@@ -701,7 +758,9 @@ export class GameService {
       solveBonus: session.solveBonus,
       vowelCost: session.vowelCost,
       turnDurationSeconds: session.turnDurationSeconds,
-      turnEndsAt: session.turnEndsAt,
+      timerStatus: session.timerStatus,
+      timerEndsAt: session.timerEndsAt,
+      timerRemainingSeconds: session.timerRemainingSeconds,
       events: [...session.events],
     };
   }

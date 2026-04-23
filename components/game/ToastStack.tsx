@@ -40,9 +40,9 @@ export function ToastStack({ toasts, onDismiss }: ToastStackProps) {
               type="button"
               className="rounded-full px-2 py-1 text-xs font-semibold opacity-70 transition hover:opacity-100"
               onClick={() => onDismiss(toast.id)}
-              aria-label="Dong thong bao"
+              aria-label="Đóng thông báo"
             >
-              Dong
+              Đóng
             </button>
           </div>
         </div>

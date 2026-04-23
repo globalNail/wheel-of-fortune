@@ -1,4 +1,6 @@
 export type SessionStatus = "waiting" | "playing" | "finished";
+export type GamePhase = "idle" | "spinning" | "waiting_host_guess";
+export type TimerStatus = "idle" | "running" | "paused";
 
 export type SegmentType = "score" | "lose-turn" | "bankrupt";
 
@@ -26,9 +28,10 @@ export interface GameEvent {
 export interface PublicGameSession {
   id: string;
   code: string;
-  category?: string;
+  question: string;
   maskedPhrase: string;
   status: SessionStatus;
+  gamePhase: GamePhase;
   teams: Team[];
   maxTeams: number;
   currentTurnTeamId: string | null;
@@ -40,7 +43,9 @@ export interface PublicGameSession {
   solveBonus: number;
   vowelCost: number;
   turnDurationSeconds: number;
-  turnEndsAt: string | null;
+  timerStatus: TimerStatus;
+  timerEndsAt: number | null;
+  timerRemainingSeconds: number | null;
   events: GameEvent[];
 }
 

@@ -4,8 +4,6 @@ import { AppError } from "../../application/services/errors";
 import { GameService } from "../../application/services/gameService";
 
 const createSessionSchema = z.object({
-  phrase: z.string().min(2),
-  category: z.string().optional(),
   numberOfTeams: z.number().int().min(2).max(8),
 });
 
@@ -32,21 +30,30 @@ const spinSchema = z.object({
 
 const guessSchema = z.object({
   code: z.string().min(6).max(6),
-  teamToken: z.string().min(1),
+  hostToken: z.string().min(1),
   letter: z.string().min(1).max(4),
 });
 
 const solveSchema = z.object({
   code: z.string().min(6).max(6),
-  teamToken: z.string().min(1),
+  hostToken: z.string().min(1),
   attempt: z.string().min(1),
+});
+
+const hostActionSchema = z.object({
+  code: z.string().min(6).max(6),
+  hostToken: z.string().min(1),
+});
+
+const setTimerSchema = z.object({
+  code: z.string().min(6).max(6),
+  hostToken: z.string().min(1),
+  seconds: z.number().int().min(5),
 });
 
 const resetSchema = z.object({
   code: z.string().min(6).max(6),
   hostToken: z.string().min(1),
-  phrase: z.string().min(2),
-  category: z.string().optional(),
   numberOfTeams: z.number().int().min(2).max(8).optional(),
 });
 
@@ -119,17 +126,7 @@ export function createRouter(gameService: GameService): Router {
   router.post("/game/guess", async (request, response, next) => {
     try {
       const input = guessSchema.parse(request.body);
-      const session = await gameService.guessConsonant(input);
-      response.json({ session });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.post("/game/buy-vowel", async (request, response, next) => {
-    try {
-      const input = guessSchema.parse(request.body);
-      const session = await gameService.buyVowel(input);
+      const session = await gameService.guessLetter(input);
       response.json({ session });
     } catch (error) {
       next(error);
@@ -156,12 +153,52 @@ export function createRouter(gameService: GameService): Router {
     }
   });
 
+  router.post("/game/next-turn", async (request, response, next) => {
+    try {
+      const input = hostActionSchema.parse(request.body);
+      const session = await gameService.nextTurn(input);
+      response.json({ session });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/game/set-timer", async (request, response, next) => {
+    try {
+      const input = setTimerSchema.parse(request.body);
+      const session = await gameService.setTimer(input);
+      response.json({ session });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/game/start-timer", async (request, response, next) => {
+    try {
+      const input = hostActionSchema.parse(request.body);
+      const session = await gameService.startTimer(input);
+      response.json({ session });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/game/stop-timer", async (request, response, next) => {
+    try {
+      const input = hostActionSchema.parse(request.body);
+      const session = await gameService.stopTimer(input);
+      response.json({ session });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
     void _next;
 
     if (error instanceof z.ZodError) {
       response.status(400).json({
-        message: "Invalid request payload.",
+        message: "Yêu cầu không hợp lệ.",
         issues: error.issues,
       });
       return;
@@ -173,7 +210,7 @@ export function createRouter(gameService: GameService): Router {
     }
 
     console.error("Unhandled server error", error);
-    response.status(500).json({ message: "Internal server error." });
+    response.status(500).json({ message: "Server sập mất rồi :(((." });
   });
 
   return router;

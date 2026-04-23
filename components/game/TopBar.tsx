@@ -28,11 +28,6 @@ export function TopBar({ session, identity, countdownSeconds, onLeaveSession }: 
           <span className="rounded-full border border-[#9ad6c0]/50 bg-[#9ad6c0]/15 px-3 py-1 text-xs font-medium uppercase tracking-[0.16em] text-[#b8f0da]">
             {statusLabel}
           </span>
-          {session?.category ? (
-            <span className="rounded-full border border-[#f4f0db]/25 bg-[#f4f0db]/10 px-3 py-1 text-xs tracking-[0.12em] text-[#f4f0db]">
-              Chủ đề: {session.category}
-            </span>
-          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-3">

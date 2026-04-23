@@ -2,9 +2,12 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ActionPanel } from "@/components/game/ActionPanel";
+import { HostActionPanel } from "@/components/game/HostActionPanel";
 import { EventFeed } from "@/components/game/EventFeed";
 import { PhraseBoard } from "@/components/game/PhraseBoard";
 import { Scoreboard } from "@/components/game/Scoreboard";
+import { RulesModal } from "@/components/game/RulesModal";
+import { GameRulesSection } from "@/components/game/GameRulesSection";
 import { ToastStack, type ToastItem, type ToastType } from "@/components/game/ToastStack";
 import { TopBar } from "@/components/game/TopBar";
 import { Wheel } from "@/components/game/Wheel";
@@ -46,15 +49,11 @@ export function GameClient() {
   const [sessionCode, setSessionCode] = useState(() => initialIdentity()?.sessionCode ?? "");
   const [loading, setLoading] = useState(false);
 
-  const [createPhrase, setCreatePhrase] = useState("");
-  const [createCategory, setCreateCategory] = useState("");
   const [createTeams, setCreateTeams] = useState(3);
 
   const [joinCode, setJoinCode] = useState("");
   const [teamName, setTeamName] = useState("");
 
-  const [resetPhrase, setResetPhrase] = useState("");
-  const [resetCategory, setResetCategory] = useState("");
   const [resetTeams, setResetTeams] = useState(3);
 
   const [wheelRotation, setWheelRotation] = useState(0);
@@ -176,7 +175,7 @@ export function GameClient() {
   }, [sessionCode, applySession, animateWheelTo, pushToast]);
 
   useEffect(() => {
-    if (session?.status !== "playing" || !session.turnEndsAt) {
+    if (session?.status !== "playing" || session?.timerStatus !== "running" || !session.timerEndsAt) {
       return;
     }
 
@@ -187,26 +186,29 @@ export function GameClient() {
     return () => {
       window.clearInterval(timerId);
     };
-  }, [session?.status, session?.turnEndsAt]);
+  }, [session?.status, session?.timerStatus, session?.timerEndsAt]);
 
   const myTeam = !session || identity?.role !== "team" || !identity.teamId
     ? null
     : session.teams.find((team) => team.id === identity.teamId) ?? null;
 
   const totalTurnSeconds = session?.turnDurationSeconds ?? 20;
-  const turnEndsAtMs = session?.turnEndsAt ? new Date(session.turnEndsAt).getTime() : null;
-  const countdownSeconds =
-    session?.status === "playing" && turnEndsAtMs !== null
-      ? Math.max(0, Math.ceil((turnEndsAtMs - nowMs) / 1000))
-      : null;
+  let countdownSeconds: number | null = null;
+  if (session?.status === "playing") {
+    if (session.timerStatus === "running" && session.timerEndsAt) {
+      countdownSeconds = Math.max(0, Math.ceil((session.timerEndsAt - nowMs) / 1000));
+    } else if (session.timerRemainingSeconds !== null) {
+      countdownSeconds = session.timerRemainingSeconds;
+    } else {
+      countdownSeconds = session.turnDurationSeconds;
+    }
+  }
 
   const isCurrentTeam = !!myTeam && session?.currentTurnTeamId === myTeam.id;
   const isHost = identity?.role === "host";
   const currentTurnTeam = session?.teams.find((team) => team.id === session.currentTurnTeamId) ?? null;
 
-  const canSpin = isCurrentTeam && session?.pendingWheelValue === null;
-  const canGuessConsonant = isCurrentTeam && session?.pendingWheelValue !== null;
-  const canBuyVowel = isCurrentTeam && session?.pendingWheelValue === null;
+  const canSpin = isCurrentTeam && session?.gamePhase === "idle" && !wheelAnimating;
 
   const winnerTeam = session?.teams.find((team) => team.id === session.winnerTeamId) || null;
 
@@ -229,8 +231,6 @@ export function GameClient() {
     setLoading(true);
     const result = await runAction(() =>
       api.createSession({
-        phrase: createPhrase,
-        category: createCategory || undefined,
         numberOfTeams: createTeams,
       }),
     );
@@ -248,8 +248,6 @@ export function GameClient() {
       setSessionCode(result.code);
       setJoinCode(result.code);
       pushToast("success", `Đã tạo phòng ${result.code}. Hãy gửi mã này cho các đội.`);
-      setResetPhrase("");
-      setResetCategory("");
     }
 
     setLoading(false);
@@ -333,27 +331,54 @@ export function GameClient() {
   }
 
   async function handleGuess(letter: string) {
-    if (!identity || identity.role !== "team" || !session) return;
+    if (!identity || identity.role !== "host" || !session) return;
     await runAction(async () => {
-      const result = await api.guess({ code: session.code, teamToken: identity.token, letter });
-      applySession(result.session);
-      return result;
-    });
-  }
-
-  async function handleBuyVowel(letter: string) {
-    if (!identity || identity.role !== "team" || !session) return;
-    await runAction(async () => {
-      const result = await api.buyVowel({ code: session.code, teamToken: identity.token, letter });
+      const result = await api.guess({ code: session.code, hostToken: identity.token, letter });
       applySession(result.session);
       return result;
     });
   }
 
   async function handleSolve(attempt: string) {
-    if (!identity || identity.role !== "team" || !session) return;
+    if (!identity || identity.role !== "host" || !session) return;
     await runAction(async () => {
-      const result = await api.solve({ code: session.code, teamToken: identity.token, attempt });
+      const result = await api.solve({ code: session.code, hostToken: identity.token, attempt });
+      applySession(result.session);
+      return result;
+    });
+  }
+
+  async function handleNextTurn() {
+    if (!identity || identity.role !== "host" || !session) return;
+    await runAction(async () => {
+      const result = await api.nextTurn({ code: session.code, hostToken: identity.token });
+      applySession(result.session);
+      return result;
+    });
+  }
+
+  async function handleSetTimer(seconds: number) {
+    if (!identity || identity.role !== "host" || !session) return;
+    await runAction(async () => {
+      const result = await api.setTimer({ code: session.code, hostToken: identity.token, seconds });
+      applySession(result.session);
+      return result;
+    });
+  }
+
+  async function handleStartTimer() {
+    if (!identity || identity.role !== "host" || !session) return;
+    await runAction(async () => {
+      const result = await api.startTimer({ code: session.code, hostToken: identity.token });
+      applySession(result.session);
+      return result;
+    });
+  }
+
+  async function handleStopTimer() {
+    if (!identity || identity.role !== "host" || !session) return;
+    await runAction(async () => {
+      const result = await api.stopTimer({ code: session.code, hostToken: identity.token });
       applySession(result.session);
       return result;
     });
@@ -367,8 +392,6 @@ export function GameClient() {
       const result = await api.reset({
         code: session.code,
         hostToken: identity.token,
-        phrase: resetPhrase,
-        category: resetCategory || undefined,
         numberOfTeams: resetTeams,
       });
       applySession(result.session);
@@ -393,31 +416,32 @@ export function GameClient() {
         <TopBar session={session} identity={identity} countdownSeconds={countdownSeconds} onLeaveSession={handleLeave} />
 
         {session ? (
-          <div className="rounded-2xl border border-[#e6d4b7] bg-[#fff7ea] px-4 py-2 text-sm text-[#674b2a]">
-            Lượt hiện tại: <strong>{currentTurnTeam?.name ?? "--"}</strong>
-            {session.pendingWheelValue !== null ? <span> | Điểm vòng quay đang chờ: {session.pendingWheelValue}</span> : null}
-            {session.lastWheelResultLabel ? <span> | Ô quay gần nhất: {session.lastWheelResultLabel}</span> : null}
+          <div className="space-y-2">
+            {session.status !== "waiting" ? (
+              <div className="rounded-2xl border border-[#b7d2e6] bg-[#eaf4ff] px-4 py-3 text-center text-lg text-[#2a4b67] select-none">
+                <span className="font-bold uppercase tracking-wider text-[#1e3a53]">Câu hỏi / Gợi ý:</span>
+                <p className="mt-1 text-xl font-medium">{session.question}</p>
+              </div>
+            ) : (
+                <div className="rounded-2xl border border-[#b7d2e6] bg-[#eaf4ff] px-4 py-3 text-center text-lg text-[#2a4b67] select-none">
+                <span className="font-bold uppercase tracking-wider text-[#1e3a53]">Câu hỏi / Gợi ý:</span>
+                <p className="mt-1 text-xl font-medium italic opacity-60">Sẽ hiển thị khi trò chơi bắt đầu</p>
+              </div>
+            )}
+            <div className="rounded-2xl border border-[#e6d4b7] bg-[#fff7ea] px-4 py-2 text-sm text-[#674b2a]">
+              Lượt hiện tại: <strong>{currentTurnTeam?.name ?? "--"}</strong>
+              {session.pendingWheelValue !== null ? <span> | Điểm vòng quay đang chờ: {session.pendingWheelValue}</span> : null}
+              {session.lastWheelResultLabel ? <span> | Ô quay gần nhất: {session.lastWheelResultLabel}</span> : null}
+            </div>
           </div>
         ) : null}
 
         {!identity ? (
-          <div className="grid gap-4 md:grid-cols-2">
+          <>
+            <div className="grid gap-4 md:grid-cols-2">
             <section className="rounded-3xl border border-[#f0d4ac] bg-[#fff8ea] p-5 shadow-lg shadow-[#c79a59]/10">
               <h2 className="mb-4 text-lg font-bold text-[#6a4a24]">Chủ phòng: Tạo phiên chơi</h2>
               <form className="space-y-3" onSubmit={handleCreateSession}>
-                <textarea
-                  required
-                  value={createPhrase}
-                  onChange={(event) => setCreatePhrase(event.target.value)}
-                  className="min-h-24 w-full rounded-2xl border border-[#e2c59a] bg-white px-3 py-2 text-sm text-[#49331a] outline-none focus:border-[#2a9d8f]"
-                  placeholder="Nhập đáp án"
-                />
-                <input
-                  value={createCategory}
-                  onChange={(event) => setCreateCategory(event.target.value)}
-                  className="w-full rounded-2xl border border-[#e2c59a] bg-white px-3 py-2 text-sm text-[#49331a] outline-none focus:border-[#2a9d8f]"
-                  placeholder="Chủ đề (tùy chọn)"
-                />
                 <input
                   type="number"
                   min={2}
@@ -464,7 +488,11 @@ export function GameClient() {
               </form>
             </section>
           </div>
-        ) : null}
+          <div className="mt-8">
+            <GameRulesSection />
+          </div>
+        </>
+      ) : null}
 
         {identity && session ? (
           <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
@@ -509,52 +537,45 @@ export function GameClient() {
                   session={session}
                   isCurrentTeam={isCurrentTeam}
                   canSpin={!!canSpin}
-                  canGuessConsonant={!!canGuessConsonant}
-                  canBuyVowel={!!canBuyVowel}
-                  teamScore={myTeam?.score ?? 0}
                   onSpin={handleSpin}
-                  onGuess={handleGuess}
-                  onBuyVowel={handleBuyVowel}
-                  onSolve={handleSolve}
-                  countdownSeconds={countdownSeconds}
-                  totalTurnSeconds={totalTurnSeconds}
                 />
               ) : null}
 
               {identity.role === "host" ? (
-                <section className="rounded-3xl border border-[#ebd7b8] bg-[#fff8ec] p-4">
-                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-[#8f6b41]">Bảng điều khiển chủ phòng</h2>
-                  <form className="grid gap-2 md:grid-cols-3" onSubmit={handleReset}>
-                    <input
-                      required
-                      value={resetPhrase}
-                      onChange={(event) => setResetPhrase(event.target.value)}
-                      className="rounded-xl border border-[#dfc39c] px-3 py-2 text-sm text-[#5f4628]"
-                      placeholder="Đáp án mới"
-                    />
-                    <input
-                      value={resetCategory}
-                      onChange={(event) => setResetCategory(event.target.value)}
-                      className="rounded-xl border border-[#dfc39c] px-3 py-2 text-sm text-[#5f4628]"
-                      placeholder="Chủ đề (tùy chọn)"
-                    />
-                    <input
-                      type="number"
-                      min={2}
-                      max={8}
-                      value={resetTeams}
-                      onChange={(event) => setResetTeams(Number(event.target.value))}
-                      className="rounded-xl border border-[#dfc39c] px-3 py-2 text-sm text-[#5f4628]"
-                      placeholder="Số đội"
-                    />
-                    <button
-                      type="submit"
-                      className="rounded-xl bg-[#cc7251] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#ad5f42] md:col-span-3"
-                    >
-                      Đặt lại ván mới
-                    </button>
-                  </form>
-                </section>
+                <div className="space-y-4">
+                  <HostActionPanel
+                    session={session}
+                    onGuess={handleGuess}
+                    onSolve={handleSolve}
+                    onNextTurn={handleNextTurn}
+                    onSetTimer={handleSetTimer}
+                    onStartTimer={handleStartTimer}
+                    onStopTimer={handleStopTimer}
+                    nowMs={nowMs}
+                    wheelAnimating={wheelAnimating}
+                  />
+
+                  <section className="rounded-3xl border border-[#ebd7b8] bg-[#fff8ec] p-4">
+                    <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-[#8f6b41]">Bảng điều khiển hệ thống</h2>
+                    <form className="grid gap-2 md:grid-cols-3" onSubmit={handleReset}>
+                      <input
+                        type="number"
+                        min={2}
+                        max={8}
+                        value={resetTeams}
+                        onChange={(event) => setResetTeams(Number(event.target.value))}
+                        className="rounded-xl border border-[#dfc39c] px-3 py-2 text-sm text-[#5f4628]"
+                        placeholder="Số đội"
+                      />
+                      <button
+                        type="submit"
+                        className="rounded-xl bg-[#cc7251] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#ad5f42] md:col-span-3"
+                      >
+                        Đặt lại ván mới
+                      </button>
+                    </form>
+                  </section>
+                </div>
               ) : null}
             </div>
 
@@ -573,6 +594,7 @@ export function GameClient() {
           </div>
         ) : null}
       </div>
+      {identity ? <RulesModal /> : null}
     </div>
   );
 }

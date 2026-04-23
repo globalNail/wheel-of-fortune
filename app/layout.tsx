@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque, Space_Mono } from "next/font/google";
 import "./globals.css";
+import AntiCopyWrapper from "@/lib/BlockDevTools";
 
 const bricolageGrotesque = Bricolage_Grotesque({
   variable: "--font-bricolage",
@@ -28,7 +29,9 @@ export default function RootLayout({
       lang="en"
       className={`${bricolageGrotesque.variable} ${spaceMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <AntiCopyWrapper>{children}</AntiCopyWrapper>
+      </body>
     </html>
   );
 }
