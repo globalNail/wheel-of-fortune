@@ -518,6 +518,61 @@ export class GameService {
     return this.toPublicSession(session);
   }
 
+  async nextQuestion(input: HostActionInput): Promise<PublicGameSession> {
+    const session = await this.requireSession(input.code);
+    this.requireHost(session, input.hostToken);
+
+    let questionData = await this.questionRepository.getNextQuestion(session.usedQuestionIds);
+    if (!questionData) {
+      // If we run out of questions, reset the used list and try again
+      session.usedQuestionIds = [];
+      questionData = await this.questionRepository.getNextQuestion([]);
+      if (!questionData) {
+        throw new AppError("No questions available in the dataset.");
+      }
+    }
+
+    session.phrase = questionData.answer;
+    session.question = questionData.question;
+    session.usedQuestionIds.push(questionData.id);
+    session.maskedPhrase = this.createMaskedPhrase(questionData.answer, []);
+    session.status = "playing";
+    session.gamePhase = "idle";
+    
+    // Set current turn to the winner of the last round, or keep current, or use first team.
+    // Let's stick with the winner of the last round if available, otherwise first team in order
+    if (session.winnerTeamId) {
+      session.currentTurnTeamId = session.winnerTeamId;
+    } else {
+      const activeTeams = this.getTeamsInTurnOrder(session).filter(t => t.status === "active");
+      if (activeTeams.length > 0) {
+        session.currentTurnTeamId = activeTeams[0].id;
+      } else {
+        session.currentTurnTeamId = null;
+      }
+    }
+
+    session.guessedLetters = [];
+    session.pendingWheelValue = null;
+    session.lastWheelSegmentId = null;
+    session.lastWheelResultLabel = null;
+    session.winnerTeamId = null;
+    
+    this.resetTimerAndStart(session);
+
+    this.pushEvent(session, "NEXT_QUESTION", {
+      question: session.question,
+    });
+
+    session.updatedAt = new Date().toISOString();
+    await this.repository.update(session);
+    
+    this.publishSessionState(session);
+    this.publishTurnChange(session);
+
+    return this.toPublicSession(session);
+  }
+
   async nextTurn(input: HostActionInput): Promise<PublicGameSession> {
     const session = await this.requireSession(input.code);
     this.requireHost(session, input.hostToken);

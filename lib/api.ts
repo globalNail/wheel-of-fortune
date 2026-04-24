@@ -88,6 +88,13 @@ export const api = {
     });
   },
 
+  nextQuestion(input: { code: string; hostToken: string }) {
+    return request<{ session: PublicGameSession }>("/game/next-question", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
   nextTurn(input: { code: string; hostToken: string }) {
     return request<{ session: PublicGameSession }>("/game/next-turn", {
       method: "POST",

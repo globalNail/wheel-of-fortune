@@ -11,6 +11,7 @@ interface HostActionPanelProps {
   onSetTimer: (seconds: number) => Promise<void>;
   onStartTimer: () => Promise<void>;
   onStopTimer: () => Promise<void>;
+  onNextQuestion: () => Promise<void>;
   nowMs: number;
   wheelAnimating: boolean;
 }
@@ -23,6 +24,7 @@ export function HostActionPanel({
   onSetTimer,
   onStartTimer,
   onStopTimer,
+  onNextQuestion,
   nowMs,
   wheelAnimating,
 }: HostActionPanelProps) {

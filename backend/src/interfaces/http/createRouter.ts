@@ -174,6 +174,16 @@ export function createRouter(gameService: GameService): Router {
     }
   });
 
+  router.post("/game/next-question", async (request, response, next) => {
+    try {
+      const input = hostActionSchema.parse(request.body);
+      const session = await gameService.nextQuestion(input);
+      response.json({ session });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.post("/game/next-turn", async (request, response, next) => {
     try {
       const input = hostActionSchema.parse(request.body);

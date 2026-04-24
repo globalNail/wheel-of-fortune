@@ -363,6 +363,15 @@ export function GameClient() {
     });
   }
 
+  async function handleNextQuestion() {
+    if (!identity || identity.role !== "host" || !session) return;
+    await runAction(async () => {
+      const result = await api.nextQuestion({ code: session.code, hostToken: identity.token });
+      applySession(result.session);
+      return result;
+    });
+  }
+
   async function handleSetTimer(seconds: number) {
     if (!identity || identity.role !== "host" || !session) return;
     await runAction(async () => {
@@ -570,12 +579,24 @@ export function GameClient() {
                     onSetTimer={handleSetTimer}
                     onStartTimer={handleStartTimer}
                     onStopTimer={handleStopTimer}
+                    onNextQuestion={handleNextQuestion}
                     nowMs={nowMs}
                     wheelAnimating={wheelAnimating}
                   />
 
                   <section className="rounded-3xl border border-[#ebd7b8] bg-[#fff8ec] p-4">
                     <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-[#8f6b41]">Bảng điều khiển hệ thống</h2>
+                    
+                    <div className="mb-4">
+                      <button
+                        type="button"
+                        onClick={handleNextQuestion}
+                        className="w-full rounded-xl bg-[#2a9d8f] px-4 py-3 text-sm font-bold uppercase tracking-[0.1em] text-white transition hover:bg-[#21867a]"
+                      >
+                        Câu hỏi tiếp theo
+                      </button>
+                    </div>
+
                     <form className="grid gap-2 md:grid-cols-3" onSubmit={handleReset}>
                       <input
                         type="number"

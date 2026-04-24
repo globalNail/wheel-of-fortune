@@ -5,7 +5,7 @@ export type TeamStatus = "active" | "left";
 
 export type SegmentType = "score" | "lose-turn" | "bankrupt";
 
-export type GameEventType = "SESSION_CREATED" | "TEAM_JOINED" | "TEAM_LEFT" | "TEAM_REJOINED" | "GAME_STARTED" | "TURN_CHANGED" | "SPIN" | "SPIN_START" | "SPIN_RESULT" | "GUESS" | "GUESS_RESULT" | "SOLVE" | "SOLVE_RESULT" | "RESET";
+export type GameEventType = "SESSION_CREATED" | "TEAM_JOINED" | "TEAM_LEFT" | "TEAM_REJOINED" | "GAME_STARTED" | "TURN_CHANGED" | "SPIN" | "SPIN_START" | "SPIN_RESULT" | "GUESS" | "GUESS_RESULT" | "SOLVE" | "SOLVE_RESULT" | "RESET" | "NEXT_QUESTION";
 
 export interface WheelSegment {
   id: string;
