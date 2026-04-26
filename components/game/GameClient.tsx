@@ -49,12 +49,12 @@ export function GameClient() {
   const [sessionCode, setSessionCode] = useState(() => initialIdentity()?.sessionCode ?? "");
   const [loading, setLoading] = useState(false);
 
-  const [createTeams, setCreateTeams] = useState(3);
+  const [createTeams, setCreateTeams] = useState(2);
 
   const [joinCode, setJoinCode] = useState("");
   const [teamName, setTeamName] = useState("");
 
-  const [resetTeams, setResetTeams] = useState(3);
+  const [resetTeams, setResetTeams] = useState(2);
 
   const [wheelRotation, setWheelRotation] = useState(0);
   const [wheelAnimating, setWheelAnimating] = useState(false);
@@ -470,6 +470,7 @@ export function GameClient() {
             <section className="rounded-3xl border border-[#f0d4ac] bg-[#fff8ea] p-5 shadow-lg shadow-[#c79a59]/10">
                 <h2 className="mb-4 text-lg font-bold text-[#6a4a24]">Chủ phòng: Tạo phòng chơi</h2>
               <form className="space-y-3" onSubmit={handleCreateSession}>
+                  <span className="text-sm text-[#7f4a1e]">Số đội chơi (tối đa 8):</span>
                 <input
                   type="number"
                   min={2}
@@ -591,13 +592,16 @@ export function GameClient() {
                       <button
                         type="button"
                         onClick={handleNextQuestion}
-                        className="w-full rounded-xl bg-[#2a9d8f] px-4 py-3 text-sm font-bold uppercase tracking-[0.1em] text-white transition hover:bg-[#21867a]"
+                        className="w-full rounded-xl bg-[#2a9d8f] px-4 py-3 text-sm font-bold uppercase tracking-widest text-white transition hover:bg-[#21867a]"
                       >
                         Câu hỏi tiếp theo
                       </button>
                     </div>
 
                     <form className="grid gap-2 md:grid-cols-3" onSubmit={handleReset}>
+                      <p className="flex items-center text-sm text-[#7f4a1e] ">
+                        Số đội cho ván mới:
+                      </p>
                       <input
                         type="number"
                         min={2}

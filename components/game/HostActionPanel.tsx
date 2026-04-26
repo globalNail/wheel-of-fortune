@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState, useEffect } from "react";
+import { FormEvent, useState } from "react";
 import type { PublicGameSession } from "@/lib/types";
 
 interface HostActionPanelProps {
@@ -31,15 +31,14 @@ export function HostActionPanel({
   const [guessLetter, setGuessLetter] = useState("");
   const [solveAttempt, setSolveAttempt] = useState("");
   const [timerInput, setTimerInput] = useState(session.turnDurationSeconds.toString());
+  const [isTimerDirty, setIsTimerDirty] = useState(false);
 
   const [loadingGuess, setLoadingGuess] = useState(false);
   const [loadingSolve, setLoadingSolve] = useState(false);
   const [loadingNext, setLoadingNext] = useState(false);
   const [loadingTimer, setLoadingTimer] = useState(false);
 
-  useEffect(() => {
-    setTimerInput(session.turnDurationSeconds.toString());
-  }, [session.turnDurationSeconds]);
+  const timerDisplayValue = isTimerDirty ? timerInput : session.turnDurationSeconds.toString();
 
   async function handleGuess(event: FormEvent) {
     event.preventDefault();
@@ -67,11 +66,12 @@ export function HostActionPanel({
 
   async function handleSetTimer(event: FormEvent) {
     event.preventDefault();
-    const seconds = parseInt(timerInput, 10);
+    const seconds = parseInt(timerDisplayValue, 10);
     if (isNaN(seconds) || seconds < 5) return;
     setLoadingTimer(true);
     try {
       await onSetTimer(seconds);
+      setIsTimerDirty(false);
     } finally {
       setLoadingTimer(false);
     }
@@ -91,7 +91,7 @@ export function HostActionPanel({
 
   return (
     <section className="rounded-3xl border border-[#ebd7b8] bg-[#fff8ec] p-4">
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-[#8f6b41]">Điều khiển trò chơi (Host)</h2>
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-[#8f6b41]">Điều khiển trò chơi</h2>
 
       <div className="grid gap-4 md:grid-cols-2">
         {/* Timer Control */}
@@ -101,13 +101,18 @@ export function HostActionPanel({
           <form onSubmit={handleSetTimer} className="flex gap-2">
             <input
               type="number"
+              title="i_timer"
               min={5}
-              value={timerInput}
-              onChange={(e) => setTimerInput(e.target.value)}
+              value={timerDisplayValue}
+              onChange={(e) => {
+                setTimerInput(e.target.value);
+                setIsTimerDirty(true);
+              }}
               className="w-16 rounded-xl border border-[#dbc4a0] px-3 py-2 text-center text-sm outline-none focus:border-[#1f6f78]"
             />
             <button
               type="submit"
+              title="btn_save"
               disabled={loadingTimer || isTimerRunning || wheelAnimating}
               className="rounded-xl bg-[#8f6b41] px-3 py-2 text-xs font-semibold text-white transition enabled:hover:bg-[#7a5934] disabled:opacity-50"
             >
@@ -119,6 +124,7 @@ export function HostActionPanel({
             {!isTimerRunning ? (
               <button
                 type="button"
+                title="btn_start"
                 onClick={onStartTimer}
                 disabled={session.status !== "playing" || wheelAnimating}
                 className="flex-1 rounded-xl bg-[#2f9f85] px-3 py-2 text-xs font-semibold text-white transition enabled:hover:bg-[#26806b] disabled:opacity-50"
@@ -128,6 +134,7 @@ export function HostActionPanel({
             ) : (
               <button
                 type="button"
+                  title="btn_pause"
                 onClick={onStopTimer}
                 disabled={wheelAnimating}
                 className="flex-1 rounded-xl bg-[#f08b37] px-3 py-2 text-xs font-semibold text-white transition enabled:hover:bg-[#d97828] disabled:opacity-50"
@@ -138,6 +145,7 @@ export function HostActionPanel({
             
             <button
               type="button"
+              title="btn_next"
               onClick={async () => {
                 setLoadingNext(true);
                 try {
@@ -165,16 +173,18 @@ export function HostActionPanel({
                 onChange={(event) => setGuessLetter(event.target.value.toUpperCase())}
                 placeholder="A"
                 className="w-16 rounded-xl border border-[#dbc4a0] px-3 py-2 text-center text-lg font-bold uppercase text-[#5b4327] outline-none focus:border-[#1f6f78]"
+                title="i_guess"
               />
               <button
                 type="submit"
                 disabled={!canGuess || loadingGuess}
                 className="flex-1 rounded-xl bg-[#f08b37] px-3 py-2 text-sm font-semibold text-white transition enabled:hover:bg-[#d97828] disabled:cursor-not-allowed disabled:opacity-50"
+                title="btn_guess"
               >
                 {loadingGuess ? "Đang gửi..." : "Đoán"}
               </button>
             </div>
-            {!canGuess && <p className="text-[10px] text-red-500">Chỉ đoán khi đang chờ (Game Phase: {session.gamePhase})</p>}
+            {/* {!canGuess && <p className="text-[10px] text-red-500">Chỉ đoán khi đang chờ (Game Phase: {session.gamePhase})</p>} */}
           </form>
 
           <form onSubmit={handleSolve} className="space-y-2 rounded-2xl border border-[#e8d7bc] bg-white p-3">
@@ -185,11 +195,13 @@ export function HostActionPanel({
                 onChange={(event) => setSolveAttempt(event.target.value)}
                 className="flex-1 rounded-xl border border-[#dbc4a0] px-3 py-2 text-sm text-[#5b4327] outline-none focus:border-[#1f6f78]"
                 placeholder="Nhập đáp án đầy đủ"
+                title="i_solve"
               />
               <button
                 type="submit"
                 disabled={!canSolve || loadingSolve}
                 className="rounded-xl bg-[#315f72] px-4 py-2 text-sm font-semibold text-white transition enabled:hover:bg-[#254a5a] disabled:cursor-not-allowed disabled:opacity-50"
+                title="btn_solve"
               >
                 {loadingSolve ? "Đang gửi..." : "Giải"}
               </button>

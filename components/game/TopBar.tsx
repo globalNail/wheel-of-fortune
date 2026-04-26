@@ -66,7 +66,7 @@ export function TopBar({ session, identity, countdownSeconds, onLeaveSession }: 
           <div className="w-full max-w-sm rounded-3xl bg-[#fff8ee] p-6 shadow-2xl shadow-black/40">
             <h2 className="text-xl font-bold text-[#5f4628]">Cảnh báo rời phòng</h2>
             <p className="mt-2 text-[#855f36]">
-              Bạn có chắc chắn muốn rời khỏi phòng không? Bạn không thể vào lại khi trò chơi đang diễn ra.
+              Bạn có chắc chắn muốn rời khỏi phòng không? 
             </p>
             <div className="mt-6 flex gap-3">
               <button
