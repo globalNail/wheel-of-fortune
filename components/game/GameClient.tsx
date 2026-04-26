@@ -18,6 +18,7 @@ import type { PlayerIdentity, PublicGameSession, WheelResultPayload } from "@/li
 import { WHEEL_SEGMENTS } from "@/lib/wheel";
 
 const ERROR_TRANSLATIONS: Record<string, string> = {
+  "Failed to fetch": "Không thể kết nối đến máy chủ.",
   "Session not found.": "Không tìm thấy phòng chơi.",
   "Cannot join because game has already started.": "Ván chơi đã bắt đầu, không thể vào thêm.",
   "Session is full.": "Phòng đã đủ đội chơi.",
